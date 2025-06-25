@@ -1,0 +1,23 @@
+{
+  "name": "simple-swap-contract",
+  "version": "1.0.0",
+  "description": "SimpleSwap - A decentralized exchange smart contract implementation",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js",
+    "verify": "hardhat verify"
+  },
+  "keywords": ["solidity", "defi", "dex", "swap", "liquidity"],
+  "author": "Veronica Bar",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "hardhat": "^2.17.0",
+    "@openzeppelin/contracts": "^4.9.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.0"
+  }
+}
