@@ -1,8 +1,23 @@
-# SimpleSwap - Decentralized Exchange Contract
+# SimpleSwap - Decentralized Exchange (DEX) Contract
+
+![Solidity](https://img.shields.io/badge/Solidity-0.8.19-blue)
+![Hardhat](https://img.shields.io/badge/Framework-Hardhat-yellow)
+![OpenZeppelin](https://img.shields.io/badge/Security-OpenZeppelin-green)
+![Gas Optimized](https://img.shields.io/badge/Gas-Optimized-red)
 
 ## 🎯 Project Overview
 
-SimpleSwap is a smart contract implementation that replicates core Uniswap functionality without depending on the Uniswap protocol. It enables users to add/remove liquidity, swap tokens, get price information, and calculate swap amounts using an Automated Market Maker (AMM) model.
+SimpleSwap es un contrato inteligente de intercambio descentralizado (DEX) que implementa un Market Maker Automatizado (AMM) simplificado, similar a Uniswap V2. Permite a los usuarios intercambiar tokens, agregar/remover liquidez y ganar comisiones como proveedores de liquidez con optimizaciones avanzadas de gas.
+
+### 🚀 Contrato Verificado
+
+El contrato está desplegado y verificado en la red Sepolia:
+
+- **Dirección**: [0x82ae690ad18b1bc5849ca42f7af5fec34546e3bc](https://sepolia.etherscan.io/address/0x82ae690ad18b1bc5849ca42f7af5fec34546e3bc)
+- **Red**: Sepolia Testnet
+- **Estado**: Verificado ✅
+- **Optimizaciones**: Gas optimizado ⛽
+- **Documento de Verificación**: [Ver informe completo](./VERIFICATION.md)
 
 ## 📋 Features
 
