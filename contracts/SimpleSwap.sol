@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
+// Importaciones para Remix (usando URLs compatible con Remix)
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -71,7 +72,7 @@ contract SimpleSwap is ERC20, ReentrancyGuard, Ownable {
     /**
      * @dev Constructor initializes the LP token with name and symbol
      */
-    constructor() ERC20("SimpleSwap LP Token", "SSLP") {}
+    constructor() ERC20("SimpleSwap LP Token", "SSLP") Ownable(msg.sender) {}
     
     /**
      * @dev Modifier to check if deadline has not passed
@@ -196,6 +197,75 @@ contract SimpleSwap is ERC20, ReentrancyGuard, Ownable {
     }
     
     /**
+     * @dev Helper function to calculate token amounts when removing liquidity
+     * @param tokenA First token address
+     * @param tokenB Second token address
+     * @param liquidity Amount of liquidity tokens to burn
+     * @return amountA Amount of tokenA to return
+     * @return amountB Amount of tokenB to return
+     * @return reserves Reserves struct for the pair
+     * @return token0 First sorted token
+     * @return token1 Second sorted token
+     */
+    function _calculateRemoveLiquidityAmounts(
+        address tokenA, 
+        address tokenB, 
+        uint256 liquidity
+    ) private view returns (
+        uint256 amountA, 
+        uint256 amountB, 
+        Reserves storage reserves,
+        address token0,
+        address token1
+    ) {
+        bytes32 pairKey = getPairKey(tokenA, tokenB);
+        require(pairExists[pairKey], "SimpleSwap: PAIR_NOT_EXISTS");
+        
+        (token0, token1) = sortTokens(tokenA, tokenB);
+        reserves = pairReserves[pairKey];
+        
+        // Calculate amounts to return
+        uint256 totalSupply = totalSupply();
+        amountA = (liquidity * (tokenA == token0 ? reserves.reserve0 : reserves.reserve1)) / totalSupply;
+        amountB = (liquidity * (tokenB == token0 ? reserves.reserve0 : reserves.reserve1)) / totalSupply;
+    }
+    
+    /**
+     * @dev Helper function to update reserves and transfer tokens when removing liquidity
+     * @param tokenA First token address
+     * @param tokenB Second token address
+     * @param token0 Sorted first token
+     * @param token1 Sorted second token
+     * @param amountA Amount of tokenA to remove
+     * @param amountB Amount of tokenB to remove
+     * @param reserves The pair's reserves
+     * @param to Address to receive the tokens
+     */
+    function _executeRemoveLiquidity(
+        address tokenA,
+        address tokenB,
+        address token0,
+        address token1,
+        uint256 amountA,
+        uint256 amountB,
+        Reserves storage reserves,
+        address to
+    ) private {
+        // Update reserves
+        if (tokenA == token0) {
+            reserves.reserve0 -= amountA;
+            reserves.reserve1 -= amountB;
+        } else {
+            reserves.reserve0 -= amountB;
+            reserves.reserve1 -= amountA;
+        }
+        
+        // Transfer tokens to user
+        IERC20(tokenA).transfer(to, amountA);
+        IERC20(tokenB).transfer(to, amountB);
+    }
+
+    /**
      * @dev Removes liquidity from a token pair pool
      * @param tokenA Address of the first token
      * @param tokenB Address of the second token
@@ -220,16 +290,11 @@ contract SimpleSwap is ERC20, ReentrancyGuard, Ownable {
         require(to != address(0), "SimpleSwap: ZERO_ADDRESS");
         require(liquidity > 0, "SimpleSwap: INSUFFICIENT_LIQUIDITY");
         
-        bytes32 pairKey = getPairKey(tokenA, tokenB);
-        require(pairExists[pairKey], "SimpleSwap: PAIR_NOT_EXISTS");
-        
-        (address token0, address token1) = sortTokens(tokenA, tokenB);
-        Reserves storage reserves = pairReserves[pairKey];
-        
-        // Calculate amounts to return
-        uint256 totalSupply = totalSupply();
-        amountA = (liquidity * (tokenA == token0 ? reserves.reserve0 : reserves.reserve1)) / totalSupply;
-        amountB = (liquidity * (tokenB == token0 ? reserves.reserve0 : reserves.reserve1)) / totalSupply;
+        // Calculate amounts and get pair data
+        address token0;
+        address token1;
+        Reserves storage reserves;
+        (amountA, amountB, reserves, token0, token1) = _calculateRemoveLiquidityAmounts(tokenA, tokenB, liquidity);
         
         require(amountA >= amountAMin, "SimpleSwap: INSUFFICIENT_A_AMOUNT");
         require(amountB >= amountBMin, "SimpleSwap: INSUFFICIENT_B_AMOUNT");
@@ -238,22 +303,57 @@ contract SimpleSwap is ERC20, ReentrancyGuard, Ownable {
         // Burn liquidity tokens from user
         _burn(msg.sender, liquidity);
         
-        // Update reserves
-        if (tokenA == token0) {
-            reserves.reserve0 -= amountA;
-            reserves.reserve1 -= amountB;
-        } else {
-            reserves.reserve0 -= amountB;
-            reserves.reserve1 -= amountA;
-        }
-        
-        // Transfer tokens to user
-        IERC20(tokenA).transfer(to, amountA);
-        IERC20(tokenB).transfer(to, amountB);
+        // Execute the removal of liquidity
+        _executeRemoveLiquidity(tokenA, tokenB, token0, token1, amountA, amountB, reserves, to);
         
         emit LiquidityRemoved(msg.sender, tokenA, tokenB, amountA, amountB, liquidity);
     }
     
+    /**
+     * @dev Helper function to handle the core swap logic
+     * @param tokenIn Input token address
+     * @param tokenOut Output token address
+     * @param amountIn Input amount
+     * @param amountOutMin Minimum output amount
+     * @param to Recipient address
+     * @return amountOut Actual output amount
+     */
+    function _swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address to
+    ) private returns (uint256 amountOut) {
+        bytes32 pairKey = getPairKey(tokenIn, tokenOut);
+        require(pairExists[pairKey], "SimpleSwap: PAIR_NOT_EXISTS");
+        
+        Reserves storage reserves = pairReserves[pairKey];
+        (address token0, address token1) = sortTokens(tokenIn, tokenOut);
+        
+        uint256 reserveIn = tokenIn == token0 ? reserves.reserve0 : reserves.reserve1;
+        uint256 reserveOut = tokenOut == token0 ? reserves.reserve0 : reserves.reserve1;
+        
+        // Calculate output amount
+        amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
+        require(amountOut >= amountOutMin, "SimpleSwap: INSUFFICIENT_OUTPUT_AMOUNT");
+        
+        // Transfer input tokens from user to contract
+        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        
+        // Update reserves
+        if (tokenIn == token0) {
+            reserves.reserve0 += amountIn;
+            reserves.reserve1 -= amountOut;
+        } else {
+            reserves.reserve0 -= amountOut;
+            reserves.reserve1 += amountIn;
+        }
+        
+        // Transfer output tokens to user
+        IERC20(tokenOut).transfer(to, amountOut);
+    }
+
     /**
      * @dev Swaps an exact amount of input tokens for as many output tokens as possible
      * @param amountIn The amount of input tokens to send
@@ -274,44 +374,19 @@ contract SimpleSwap is ERC20, ReentrancyGuard, Ownable {
         require(amountIn > 0, "SimpleSwap: INSUFFICIENT_INPUT_AMOUNT");
         require(to != address(0), "SimpleSwap: ZERO_ADDRESS");
         
-        amounts = new uint256[](path.length);
-        amounts[0] = amountIn;
-        
         // For this simple implementation, we only support direct swaps (path length = 2)
         require(path.length == 2, "SimpleSwap: ONLY_DIRECT_SWAPS");
         
         address tokenIn = path[0];
         address tokenOut = path[1];
         
-        bytes32 pairKey = getPairKey(tokenIn, tokenOut);
-        require(pairExists[pairKey], "SimpleSwap: PAIR_NOT_EXISTS");
+        // Perform the swap operation
+        uint256 amountOut = _swap(tokenIn, tokenOut, amountIn, amountOutMin, to);
         
-        Reserves storage reserves = pairReserves[pairKey];
-        (address token0, address token1) = sortTokens(tokenIn, tokenOut);
-        
-        uint256 reserveIn = tokenIn == token0 ? reserves.reserve0 : reserves.reserve1;
-        uint256 reserveOut = tokenOut == token0 ? reserves.reserve0 : reserves.reserve1;
-        
-        // Calculate output amount
-        uint256 amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
-        require(amountOut >= amountOutMin, "SimpleSwap: INSUFFICIENT_OUTPUT_AMOUNT");
-        
+        // Prepare return values
+        amounts = new uint256[](path.length);
+        amounts[0] = amountIn;
         amounts[1] = amountOut;
-        
-        // Transfer input tokens from user to contract
-        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
-        
-        // Update reserves
-        if (tokenIn == token0) {
-            reserves.reserve0 += amountIn;
-            reserves.reserve1 -= amountOut;
-        } else {
-            reserves.reserve0 -= amountOut;
-            reserves.reserve1 += amountIn;
-        }
-        
-        // Transfer output tokens to user
-        IERC20(tokenOut).transfer(to, amountOut);
         
         emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
     }
